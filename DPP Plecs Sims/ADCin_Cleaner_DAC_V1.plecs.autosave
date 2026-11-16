@@ -1,5 +1,5 @@
 Plecs {
-  Name          "26_11_5_Model_Based_DPP_NoPlant"
+  Name          "ADCin_Cleaner_DAC_V1"
   Version       "5.0"
   CircuitModel  "ContStateSpace"
   StartTime     "0.0"
@@ -40,7 +40,7 @@ Plecs {
   CodeGenBaseName ""
   CodeGenOutputDir ""
   CodeGenExtraOpts ""
-  CodeGenTarget "TI2837xS"
+  CodeGenTarget "TI2837x"
   CodeGenTargetSettings "AAAAfwAAAAAbQ29kZUdlblRhcmdldDo6U2V0dGluZ3NNYXAAAAAAA"
 "gAAAA4AVABJADIAOAAzADcAeAAAAFsAAAAiAEEAbgBUAHIAaQBwADEAQQBkAGMAQwBoAGEAbgBuAG"
 "UAbAAAAAIAMAAAABwAQQBuAFQAcgBpAHAAMQBBAGQAYwBVAG4AaQB0AAAAAgAxAAAAGgBBAG4AVAB"
@@ -162,10 +162,10 @@ Plecs {
   DiscretizationMethod "2"
   ExternalModeSettings "AAAAfwAAAAAYQ29kZUdlblRhcmdldDo6U2V0dGluZ3MAAAAABwAAAB"
 "QARABlAGMAaQBtAGEAdABpAG8AbgAAAAIANQAAABQATgB1AG0AUwBhAG0AcABsAGUAcwAAAAgANAA"
-"wADkANgAAABYAUgBlAGYAcgBlAHMAaABSAGEAdABlAAAABAAxADAAAAAWAFMAZQBuAHMAaQB0AGkA"
-"dgBpAHQAeQAAAAIAMAAAABwAVAByAGkAZwBnAGUAcgBDAGgAYQBuAG4AZQBsAAAABAAtADEAAAAYA"
-"FQAcgBpAGcAZwBlAHIARABlAGwAYQB5AAAAAgAwAAAAGABUAHIAaQBnAGcAZQByAFYAYQBsAHUAZQ"
-"AAAAIAMA=="
+"wADkANgAAABYAUgBlAGYAcgBlAHMAaABSAGEAdABlAAAAAgAxAAAAFgBTAGUAbgBzAGkAdABpAHYA"
+"aQB0AHkAAAACADAAAAAcAFQAcgBpAGcAZwBlAHIAQwBoAGEAbgBuAGUAbAAAAAQALQAxAAAAGABUA"
+"HIAaQBnAGcAZQByAEQAZQBsAGEAeQAAAAIAMAAAABgAVAByAGkAZwBnAGUAcgBWAGEAbAB1AGUAAA"
+"ACADA="
   AlgebraicLoopMethod "1"
   AlgebraicLoopTolerance "1e-6"
   ScriptsDialogGeometry "[640 382 623 267]"
@@ -188,10 +188,6 @@ Plecs {
   InvalidNetlistFunctionEvaluationMsg "1"
   IncompatibleInitialConditionMsg "2"
   Terminal {
-    Type          Input
-    Index         "1"
-  }
-  Terminal {
     Type          Output
     Index         "1"
   }
@@ -201,12 +197,24 @@ Plecs {
   }
   Terminal {
     Type          Input
+    Index         "1"
+  }
+  Terminal {
+    Type          Input
     Index         "2"
+  }
+  Terminal {
+    Type          Output
+    Index         "3"
+  }
+  Terminal {
+    Type          Output
+    Index         "4"
   }
   Schematic {
-    Location      [0, 65; 1512, 894]
+    Location      [0, 65; 1512, 898]
     ZoomFactor    1.11393
-    SliderPosition [0, 94]
+    SliderPosition [0, 90]
     ShowBrowser   off
     BrowserWidth  100
     Component {
@@ -248,7 +256,7 @@ Plecs {
       LabelPosition south
       Parameter {
         Variable      "DialogGeometry"
-        Value         "[8 31 1691 980]"
+        Value         "[0 65 1492 840]"
         Show          off
       }
       Parameter {
@@ -319,83 +327,86 @@ Plecs {
       Parameter {
         Variable      "Declarations"
         Value         "#include <math.h>\n"
-"#include <stdio.h>\n"
 "\n"
-"#define Im1 InputSignal(0,0)\n"
-"#define T0 InputSignal(0,1)\n"
-"#define Vinit InputSignal(0,2)\n"
-"\n"
+"#define Im1  InputSignal(0,0)\n"
+"#define T0   InputSignal(0,1)\n"
+"/* InputSignal(0,2) (old Vinit) is no longer used */\n"
 "#define Vout OutputSignal(0,0)\n"
-"//#define y OutputSignal(0,1)\n"
-"//#define y1 OutputSignal(0,2)\n"
 "\n"
-"//#define y2 OutputSignal(0,3)\n"
-"//#define y3 OutputSignal(0,4)\n"
-"//#define y4 OutputSignal(0,5)\n"
-"//#define y5 OutputSignal(0,6)\n"
+"/* Physical constants (exact SI, same as MATLAB) */\n"
+"#define Q_E 1.602176634e-19\n"
+"#define K_B 1.380649e-23\n"
 "\n"
-"float Isc=9.91;                           //short-circuit current\n"
+"/* PV parameters: same values as the MATLAB model */\n"
+"static const double Isc = 9.91;          /* short-circuit current [A] */\n"
+"static const double Voc = 39.71/3.0;     /* open-circuit voltage [V] */\n"
+"static const double A   = 1.0;           /* diode ideality factor */\n"
+"static const double Ns  = 20.0;          /* series cells (60/3) */\n"
+"static const double Rs  = 0.0907;        /* series resistance [ohm] */\n"
+"static const double Rsh = 276.4340;      /* shunt resistance [ohm] */\n"
 "\n"
-"float Voc=39.71/3;                          //open circuit voltage\n"
+"static double a1, Is1, VocT;             /* temperature-dependent */\n"
+"static double V_prev;                    /* warm start: last solution */\n"
 "\n"
-"float a=1;                             //diode ideality factor\n"
-"//int Ns=60;                               //series connected cells\n"
-"int Ns=60/3;                               //series connected cells\n"
+"static void pv_params(double T0C)\n"
+"{\n"
+"    double T1 = T0C + 273.15;\n"
+"    double B  = -0.28*Voc/100.0;         /* Voc temp. coeff. [V/K] */\n"
+"    VocT = Voc + B*(T1 - 298.15);\n"
+"    a1   = Q_E/(Ns*K_B*T1*A);\n"
+"    Is1  = (Isc + Isc*Rs/Rsh - VocT/Rsh) /\n"
+"           (exp(a1*VocT) - exp(a1*Isc*Rs));\n"
+"}\n"
 "\n"
-"float Rs=0.0907;                       //series resistance\n"
+"/* MPP condition f(V) = I + V*dI/dV, and its partial derivative wrt V */\n"
+"static double mpp_f(double V, double I, double *df)\n"
+"{\n"
+"    double arg = a1*(V + I*Rs), e, N, D, dN, dD;\n"
+"    if (arg > 700.0) arg = 700.0;\n"
+"    e  = exp(arg);\n"
+"    N  = -Is1*a1*e - 1.0/Rsh;\n"
+"    D  = 1.0 + Rs/Rsh + a1*Is1*Rs*e;\n"
+"    dN = -Is1*a1*a1*e;\n"
+"    dD =  a1*a1*Is1*Rs*e;\n"
+"    *df = N/D + V*(dN*D - N*dD)/(D*D);\n"
+"    return I + V*N/D;\n"
+"}\n"
 "\n"
-"float Rp=276.43;                          //parallel resistance\n"
-"float Rsh=276.43;                          //parallel resistance\n"
+"/* Ideal MPP voltage at current Im: safeguarded Newton on [0, VocT] */\n"
+"static double vmpp_ideal(double Im)\n"
+"{\n"
+"    double I = Im, lo = 0.0, hi = VocT, V = V_prev, f, df, Vn;\n"
+"    int it;\n"
 "\n"
-"//long double k=1.38*10e-23;                      //boltzmann's constant\n"
-"long double k=1.38e-23;                      //boltzmann's constant\n"
-"//long double q=1.602*10e-19;                     //electron charge\n"
-"long double q=1.602e-19;                     //electron charge\n"
-"int i;\n"
-"double V1;\n"
-"double Vout0;\n"
-"//Iteration criterias\n"
-"int n=30;                               //number of iterations\n"
+"    if (I < 0.0) I = 0.0;\n"
+"    if (I > Isc) I = Isc;\n"
+"    if (!(V > lo && V < hi)) V = 0.8*VocT;\n"
 "\n"
-"double tol=1e-10;\n"
+"    for (it = 0; it < 20; it++) {\n"
+"        f = mpp_f(V, I, &df);\n"
+"        if (f > 0.0) lo = V; else hi = V;\n"
+"        Vn = V - f/df;\n"
+"        if (!(Vn > lo && Vn < hi)) Vn = 0.5*(lo + hi);\n"
+"        if (fabs(Vn - V) < 1e-6) { V = Vn; break; }\n"
+"        V = Vn;\n"
+"    }\n"
+"    V_prev = V;\n"
+"    return V;\n"
+"}"
         Show          off
       }
       Parameter {
         Variable      "StartFcn"
-        Value         ""
+        Value         "V_prev = 0.8*Voc;"
         Show          off
       }
       Parameter {
         Variable      "OutputFcn"
-        Value         base64 "ZG91YmxlIFYgPVZpbml0OwpmbG9hdCBUMT1UMCsyNzM7CmZs"
-"b2F0IEI9IC0wLjI4KlZvYy8xMDA7CmZsb2F0IGExPSBxLyhOcyprKlQxKmEpOwogLy8gc2F0dXJhd"
-"GlvbiBjdXJyZW50CmZsb2F0IElzMT0oSXNjK0lzYypScy9ScC0oVm9jK0IqKFQxLTI5OCkpL1JwKS"
-"8oZXhwKHEqKFZvYytCKihUMS0yOTgpKS8oTnMqaypUMSphKSktZXhwKHEqSXNjKlJzLyhOcyprKlQ"
-"xKmEpKSk7CgoKLy9pbnQgY250ID0gMDsgIC8vIEluaXRpYWxpemUgdGhlIGNvdW50ZXIKLy9pbnQg"
-"Y250bGltID0gMTA7IC8vIFNldCB0aGUgY291bnRlciBsaW1pdAoKLy9kb3sgCi8vZm9yKGNudCA9M"
-"DsgY250PD1jbnRsaW07IGNudCsrKSB7CnN0YXRpYyBpbnQgY250ID0gMDsKc3RhdGljIGludCBjbn"
-"RsaW0gPSA1MDsKCi8veSA9IGNudDsKCmlmIChjbnQgPD0gY250bGltKSB7CiAgICAgICAgICAgIAo"
-"gIGZvcihpPTA7aTxuO2krKyl7CmRvdWJsZSBmPSBJbTEgKyBWKiggLUlzMSphMSpleHAoYTEqKFYr"
-"SW0xKlJzKSktMS9Sc2gpLyhScy9Sc2grMSthMSpJczEqUnMqZXhwKGExKihWK0ltMSpScykpICk7C"
-"mRvdWJsZSBmMT0gMiooLUlzMSphMSpleHAoYTEqKFYrSW0xKlJzKSktMS9Sc2gpLyhScy9Sc2grMS"
-"thMSpJczEqUnMqZXhwKGExKihWK0ltMSpScykpKSArIFYqKCAgICgoUnMvUnNoKzErYTEqSXMxKlJ"
-"zKmV4cChhMSooVitJbTEqUnMpKSkqKC1JczEqYTEqYTEqZXhwKGExKihWK0ltMSpScykpLWExKmEx"
-"KklzMSpScyoKICAgICAgICAgICAgICAgKC1JczEqYTEqZXhwKGExKihWK0ltMSpScykpLTEvUnNoK"
-"S8oUnMvUnNoKzErYTEqSXMxKlJzKmV4cChhMSooVitJbTEqUnMpKSkqZXhwKGExKihWK0ltMSpScy"
-"kpKSApIC0gKCAoLWExKklzMSpleHAoYTEqKFYrSW0xKlJzKSktMS9Sc2gpKSAqKCBhMSphMSpJczE"
-"qUnMqZXhwKGExKihWK0ltMSpScykpK2ExKmExKklzMSpScypScyoKICAgICAgICAgICAgICAgKC1J"
-"czEqYTEqZXhwKGExKihWK0ltMSpScykpLTEvUnNoKS8oUnMvUnNoKzErYTEqSXMxKlJzKmV4cChhM"
-"SooVitJbTEqUnMpKSkqZXhwKGExKihWK0ltMSpScykpICkgICAgCiAgICAgICAgIC8gKCAoUnMvUn"
-"NoKzErYTEqSXMxKlJzKmV4cChhMSooVitJbTEqUnMpKSkqKFJzL1JzaCsxK2ExKklzMSpScypleHA"
-"oYTEqKFYrSW0xKlJzKSkpKSAgKTsKCiAgICBWMT0gVi0oZi9mMSk7CiAgICAgICAgLy8g5pS25paC"
-"5qKd5Lu2CiAgICAgICAgaWYoICBmYWJzKFYxLVYpPHRvbCApCiAgICAgICAgewogICAgICAgICAgI"
-"GJyZWFrOwogICAgICAgIH0KICAgICAKICAgIFY9VjE7ICAgLy8g5pu05pawIFYKLy8gICAgICAgIH"
-"kyID0gY250OyAKICAgICAgLy8geTIgPSBWOyAKICB9IAoKICAgIGNudCsrOyAgICAgLy8g5aSW5bG"
-"k6KiI5pW45Zmo6YGe5aKeCiAgIAogICAgLy95Mz1jbnQ7IAogICAgLy95PVY7CiAgICBWb3V0MD1W"
-"Owp9IAplbHNlIHsgIAoKVm91dD1Wb3V0MDsgIC8vIEZpbmFsIE91dHB1dCAgICAvLyDoqIjnrpflr"
-"ozmiJDvvIzovLjlh7rntZDmnpwKICAgIC8vY250ID0gMDsgIC8vIOWbnuWIsDDvvIznubznuozlvq"
-"rnkrAKICAKICAgICAvL3k1PWNudDsKICAgICAvLyB5ND1WOwp9ICAgIAogICAvLyAgeTEgPSBWOwo"
-"KCiAgCgoK"
+        Value         "pv_params(T0);\n"
+"Vout = vmpp_ideal(Im1);\n"
+"  \n"
+"\n"
+"\n"
         Show          off
       }
       Parameter {
@@ -566,8 +577,8 @@ Plecs {
 "BAAAAAQAAAAIAAAACPwAAAABAAAAAgAAAAEAAAAOAFQAbwBvAGwAQgBhAHIBAAAAAP////8AAAAAA"
 "AAAAA=="
       SavedViews    "AAAAAgAAAAA="
-      HeaderState   "{\"DefaultSecSize\":100,\"FirstSecSize\":184,\"Labels\":["
-"\"Mean\"],\"VisualIdxs\":[8]}"
+      HeaderState   "{\"DefaultSecSize\":0,\"FirstSecSize\":184,\"Labels\":[\""
+"Mean\"],\"VisualIdxs\":[8]}"
       PlotPalettes  "AAAAAQAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAA"
 "AEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 "=="
@@ -862,87 +873,6 @@ Plecs {
       }
     }
     Component {
-      Type          Reference
-      SrcComponent  "TIC2000_Lib/ADC"
-      Name          "i1(68 gen brd)B4   B5  V1 B3(25) --J3_6  V2 B2(28) --J3_9"
-      Show          on
-      Position      [235, 155]
-      Direction     up
-      Flipped       off
-      LabelPosition north
-      Frame         [-25, -25; 25, 25]
-      Parameter {
-        Variable      "TrigSrc"
-        Value         "1"
-        Show          off
-      }
-      Parameter {
-        Variable      "SigMode"
-        Value         "1"
-        Show          off
-      }
-      Parameter {
-        Variable      "AdcUnit"
-        Value         "2"
-        Show          on
-      }
-      Parameter {
-        Variable      "Input"
-        Value         "[4 3 2]"
-        Show          on
-      }
-      Parameter {
-        Variable      "Scale"
-        Value         "[4.5 4.576 4.686]"
-        Show          on
-      }
-      Parameter {
-        Variable      "Offset"
-        Value         "[0]"
-        Show          on
-      }
-      Parameter {
-        Variable      "AcqTimeSel"
-        Value         "1"
-        Show          off
-      }
-      Parameter {
-        Variable      "AcqTime"
-        Value         "0"
-        Show          off
-      }
-      Parameter {
-        Variable      "BitRes"
-        Value         ""
-        Show          off
-      }
-      Parameter {
-        Variable      "VoltageRef"
-        Value         ""
-        Show          off
-      }
-      Parameter {
-        Variable      "TargetPortIndices"
-        Value         "1"
-        Show          off
-      }
-      Terminal {
-        Type          Output
-        Position      [29, 0]
-        Direction     right
-      }
-      Terminal {
-        Type          EventOutput
-        Position      [29, 15]
-        Direction     right
-      }
-      Terminal {
-        Type          EventInput
-        Position      [0, -25]
-        Direction     up
-      }
-    }
-    Component {
       Type          SignalDemux
       Name          "Demux1"
       Show          off
@@ -1047,7 +977,7 @@ Plecs {
       LabelPosition south
       Parameter {
         Variable      "Tag"
-        Value         "I2Avg"
+        Value         "I1Avg"
         Show          off
       }
       Parameter {
@@ -1355,7 +1285,7 @@ Plecs {
       LabelPosition south
       Parameter {
         Variable      "Tag"
-        Value         "I1Avg"
+        Value         "I2Avg"
         Show          off
       }
       Parameter {
@@ -1460,11 +1390,11 @@ Plecs {
       Flipped       off
       LabelPosition east
       Frame         [-20, -15; 20, 15]
-      Location      [0, 24; 1707, 999]
+      Location      [0, 65; 1512, 925]
       State         "AAAA/wAAAAD9AAAAAgAAAAEAAAAAAAAAAPwCAAAAA/sAAAAQAFoAbwBvA"
-"G0AQQByAGUAYQAAAAAA/////wAAAH8A////+wAAABQAUwBhAHYAZQBkAFYAaQBlAHcAcwAAAAAA//"
-"///wAAAGEA////+wAAAAwAVAByAGEAYwBlAHMAAAAAAP////8AAABhAP///wAAAAMAAAarAAAAmfw"
-"BAAAAAfsAAAAUAEQAYQB0AGEAVwBpAGQAZwBlAHQBAAAAAAAABqsAAABEAP///wAABqsAAAMRAAAA"
+"G0AQQByAGUAYQAAAAAA/////wAAAIQA////+wAAABQAUwBhAHYAZQBkAFYAaQBlAHcAcwAAAAAA//"
+"///wAAAGYA////+wAAAAwAVAByAGEAYwBlAHMAAAAAAP////8AAABmAP///wAAAAMAAAXoAAAAmfw"
+"BAAAAAfsAAAAUAEQAYQB0AGEAVwBpAGQAZwBlAHQBAAAAAAAABegAAABFAP///wAABegAAAKmAAAA"
 "BAAAAAQAAAAIAAAACPwAAAABAAAAAgAAAAEAAAAOAFQAbwBvAGwAQgBhAHIBAAAAAP////8AAAAAA"
 "AAAAA=="
       SavedViews    "AAAAAgAAAAA="
@@ -1570,196 +1500,6 @@ Plecs {
       Parameter {
         Variable      "DataType"
         Value         "10"
-        Show          off
-      }
-    }
-    Component {
-      Type          CScript
-      Name          "IV and NL3"
-      Show          on
-      Position      [505, 765]
-      Direction     up
-      Flipped       off
-      LabelPosition south
-      Parameter {
-        Variable      "DialogGeometry"
-        Value         "[7 30 1283 700]"
-        Show          off
-      }
-      Parameter {
-        Variable      "NumInputs"
-        Value         "3"
-        Show          off
-      }
-      Parameter {
-        Variable      "NumOutputs"
-        Value         "1"
-        Show          off
-      }
-      Parameter {
-        Variable      "NumContStates"
-        Value         "1"
-        Show          off
-      }
-      Parameter {
-        Variable      "NumDiscStates"
-        Value         "0"
-        Show          off
-      }
-      Parameter {
-        Variable      "NumZCSignals"
-        Value         "0"
-        Show          off
-      }
-      Parameter {
-        Variable      "DirectFeedthrough"
-        Value         "1"
-        Show          off
-      }
-      Parameter {
-        Variable      "Ts"
-        Value         "[0,0]"
-        Show          off
-      }
-      Parameter {
-        Variable      "TerminalBasedSampleTimes"
-        Value         "1"
-        Show          off
-      }
-      Parameter {
-        Variable      "Parameters"
-        Value         ""
-        Show          off
-      }
-      Parameter {
-        Variable      "LangStandard"
-        Value         "2"
-        Show          off
-      }
-      Parameter {
-        Variable      "GnuExtensions"
-        Value         "1"
-        Show          off
-      }
-      Parameter {
-        Variable      "RuntimeCheck"
-        Value         "2"
-        Show          off
-      }
-      Parameter {
-        Variable      "HighlightLevel"
-        Value         "0"
-        Show          off
-      }
-      Parameter {
-        Variable      "Declarations"
-        Value         "#include <math.h>\n"
-"#include <stdio.h>\n"
-"\n"
-"#define Im1 InputSignal(0,0)\n"
-"#define T002 InputSignal(0,1)\n"
-"#define Vinit2 InputSignal(0,2)\n"
-"\n"
-"#define VoutCS2 OutputSignal(0,0)\n"
-"//#define y OutputSignal(0,1)\n"
-"//#define y1 OutputSignal(0,2)\n"
-"\n"
-"//#define y2 OutputSignal(0,3)\n"
-"//#define y3 OutputSignal(0,4)\n"
-"//#define y4 OutputSignal(0,5)\n"
-"//#define y5 OutputSignal(0,6)\n"
-"\n"
-"float Isc2=9.91;                           //short-circuit current\n"
-"\n"
-"float Voc2=39.71/3;                          //open circuit voltage\n"
-"\n"
-"float a2=1;                             //diode ideality factor\n"
-"\n"
-"int Ns2=60/3;                               //series connected cells\n"
-"\n"
-"float Rs2=0.0907;                       //series resistance\n"
-"\n"
-"float Rp2=276.43;                          //parallel resistance\n"
-"float Rsh2=276.43;                          //parallel resistance\n"
-"\n"
-"//long double k=1.38*10e-23;                      //boltzmann's constant\n"
-"long double k2=1.38e-23;                      //boltzmann's constant\n"
-"//long double q=1.602*10e-19;                     //electron charge\n"
-"long double q2=1.602e-19;                     //electron charge\n"
-"\n"
-"int j;\n"
-"double V1CS2;\n"
-"double Vout0CS2;\n"
-"//Iteration criterias\n"
-"int n2=30;                               //number of iterations\n"
-"\n"
-"double tol2=1e-10;\n"
-        Show          off
-      }
-      Parameter {
-        Variable      "StartFcn"
-        Value         ""
-        Show          off
-      }
-      Parameter {
-        Variable      "OutputFcn"
-        Value         base64 "ZG91YmxlIFZDUzIgPVZpbml0MjsKZmxvYXQgVDFDUzI9VDAw"
-"MisyNzM7CmZsb2F0IEJDUzI9IC0wLjI4KlZvYzIvMTAwOwpmbG9hdCBhMUNTMj0gcTIvKE5zMiprM"
-"ipUMUNTMiphMik7CiAvLyBzYXR1cmF0aW9uIGN1cnJlbnQKZmxvYXQgSXMxQ1MyPShJc2MyK0lzYz"
-"IqUnMyL1JwMi0oVm9jMitCQ1MyKihUMUNTMi0yOTgpKS9ScDIpLyhleHAocTIqKFZvYzIrQkNTMio"
-"oVDFDUzItMjk4KSkvKE5zMiprMipUMUNTMiphMikpLWV4cChxMipJc2MyKlJzMi8oTnMyKmsyKlQx"
-"Q1MyKmEyKSkpOwoKCi8vaW50IGNudCA9IDA7ICAvLyBJbml0aWFsaXplIHRoZSBjb3VudGVyCi8va"
-"W50IGNudGxpbSA9IDEwOyAvLyBTZXQgdGhlIGNvdW50ZXIgbGltaXQKCi8vZG97IAovL2Zvcihjbn"
-"QgPTA7IGNudDw9Y250bGltOyBjbnQrKykgewpzdGF0aWMgaW50IGNudDIgPSAwOwpzdGF0aWMgaW5"
-"0IGNudGxpbTIgPSA1MDsKCi8veSA9IGNudDsKCmlmIChjbnQyIDw9IGNudGxpbTIpIHsKICAgICAg"
-"ICAgICAgCiAgZm9yKGo9MDtqPG4yO2orKyl7CmRvdWJsZSBmQ1MyPSBJbTEgKyBWQ1MyKiggLUlzM"
-"UNTMiphMUNTMipleHAoYTFDUzIqKFZDUzIrSW0xKlJzMikpLTEvUnNoMikvKFJzMi9Sc2gyKzErYT"
-"FDUzIqSXMxQ1MyKlJzMipleHAoYTFDUzIqKFZDUzIrSW0xKlJzMikpICk7CmRvdWJsZSBmMUNTMj0"
-"gMiooLUlzMUNTMiphMUNTMipleHAoYTFDUzIqKFZDUzIrSW0xKlJzMikpLTEvUnNoMikvKFJzMi9S"
-"c2gyKzErYTFDUzIqSXMxQ1MyKlJzMipleHAoYTFDUzIqKFZDUzIrSW0xKlJzMikpKSArIFZDUzIqK"
-"CAgICgoUnMyL1JzaDIrMSthMUNTMipJczFDUzIqUnMyKmV4cChhMUNTMiooVkNTMitJbTEqUnMyKS"
-"kpKigtSXMxQ1MyKmExQ1MyKmExQ1MyKmV4cChhMUNTMiooVkNTMitJbTEqUnMyKSktYTFDUzIqYTF"
-"DUzIqSXMxQ1MyKlJzMioKICAgICAgICAgICAgICAgKC1JczFDUzIqYTFDUzIqZXhwKGExQ1MyKihW"
-"Q1MyK0ltMSpSczIpKS0xL1JzaDIpLyhSczIvUnNoMisxK2ExQ1MyKklzMUNTMipSczIqZXhwKGExQ"
-"1MyKihWQ1MyK0ltMSpSczIpKSkqZXhwKGExQ1MyKihWQ1MyK0ltMSpSczIpKSkgKSAtICggKC1hMU"
-"NTMipJczFDUzIqZXhwKGExQ1MyKihWQ1MyK0ltMSpSczIpKS0xL1JzaDIpKSAqKCBhMUNTMiphMUN"
-"TMipJczFDUzIqUnMyKmV4cChhMUNTMiooVkNTMitJbTEqUnMyKSkrYTFDUzIqYTFDUzIqSXMxQ1My"
-"KlJzMipSczIqCiAgICAgICAgICAgICAgICgtSXMxQ1MyKmExQ1MyKmV4cChhMUNTMiooVkNTMitJb"
-"TEqUnMyKSktMS9Sc2gyKS8oUnMyL1JzaDIrMSthMUNTMipJczFDUzIqUnMyKmV4cChhMUNTMiooVk"
-"NTMitJbTEqUnMyKSkpKmV4cChhMUNTMiooVkNTMitJbTEqUnMyKSkgKSAgICAKICAgICAgICAgLyA"
-"oIChSczIvUnNoMisxK2ExQ1MyKklzMUNTMipSczIqZXhwKGExQ1MyKihWQ1MyK0ltMSpSczIpKSkq"
-"KFJzMi9Sc2gyKzErYTFDUzIqSXMxQ1MyKlJzMipleHAoYTFDUzIqKFZDUzIrSW0xKlJzMikpKSkgI"
-"Ck7CgogICAgVjFDUzI9IFZDUzItKGZDUzIvZjFDUzIpOwogICAgICAgIC8vIOaUtuaWguaineS7tg"
-"ogICAgICAgIGlmKCAgZmFicyhWMUNTMi1WQ1MyKTx0b2wyICkKICAgICAgICB7CiAgICAgICAgICA"
-"gYnJlYWs7CiAgICAgICAgfQogICAgIAogICAgVkNTMj1WMUNTMjsgICAvLyDmm7TmlrAgVgoKICB9"
-"IAoKICAgIGNudDIrKzsgICAgIC8vIOWkluWxpOioiOaVuOWZqOmBnuWingogICAKCiAgICBWb3V0M"
-"ENTMj1WQ1MyOwp9IAplbHNlIHsgIAoKVm91dENTMj1Wb3V0MENTMjsgIC8vIEZpbmFsIE91dHB1dC"
-"AgICAvLyDoqIjnrpflrozmiJDvvIzovLjlh7rntZDmnpwKICAgCn0gICAgCiAgIAoKICAKCgo="
-        Show          off
-      }
-      Parameter {
-        Variable      "UpdateFcn"
-        Value         ""
-        Show          off
-      }
-      Parameter {
-        Variable      "DerivativeFcn"
-        Value         ""
-        Show          off
-      }
-      Parameter {
-        Variable      "TerminateFcn"
-        Value         ""
-        Show          off
-      }
-      Parameter {
-        Variable      "StoreCustomStateFcn"
-        Value         ""
-        Show          off
-      }
-      Parameter {
-        Variable      "RestoreCustomStateFcn"
-        Value         ""
         Show          off
       }
     }
@@ -2237,87 +1977,6 @@ Plecs {
     }
     Component {
       Type          Reference
-      SrcComponent  "TIC2000_Lib/ADC"
-      Name          "  i2 (70 --J7_9)"
-      Show          on
-      Position      [340, 320]
-      Direction     up
-      Flipped       off
-      LabelPosition north
-      Frame         [-25, -25; 25, 25]
-      Parameter {
-        Variable      "TrigSrc"
-        Value         "1"
-        Show          off
-      }
-      Parameter {
-        Variable      "SigMode"
-        Value         "1"
-        Show          off
-      }
-      Parameter {
-        Variable      "AdcUnit"
-        Value         "1"
-        Show          on
-      }
-      Parameter {
-        Variable      "Input"
-        Value         "[1]"
-        Show          on
-      }
-      Parameter {
-        Variable      "Scale"
-        Value         "[3.55]"
-        Show          on
-      }
-      Parameter {
-        Variable      "Offset"
-        Value         "[0]"
-        Show          off
-      }
-      Parameter {
-        Variable      "AcqTimeSel"
-        Value         "1"
-        Show          off
-      }
-      Parameter {
-        Variable      "AcqTime"
-        Value         "0"
-        Show          off
-      }
-      Parameter {
-        Variable      "BitRes"
-        Value         ""
-        Show          off
-      }
-      Parameter {
-        Variable      "VoltageRef"
-        Value         ""
-        Show          off
-      }
-      Parameter {
-        Variable      "TargetPortIndices"
-        Value         "2"
-        Show          off
-      }
-      Terminal {
-        Type          Output
-        Position      [29, 0]
-        Direction     right
-      }
-      Terminal {
-        Type          EventOutput
-        Position      [29, 15]
-        Direction     right
-      }
-      Terminal {
-        Type          EventInput
-        Position      [0, -25]
-        Direction     up
-      }
-    }
-    Component {
-      Type          Reference
       SrcComponent  "Components/Control/Discrete/Discrete PID\\nController"
       Name          "Discrete PID\nController"
       Show          on
@@ -2628,6 +2287,449 @@ Plecs {
         Direction     left
       }
     }
+    Component {
+      Type          Reference
+      SrcComponent  "TIC2000_Lib/ADC"
+      Name          "ADC"
+      Show          on
+      Position      [225, 155]
+      Direction     up
+      Flipped       off
+      LabelPosition south
+      Frame         [-25, -25; 25, 25]
+      Parameter {
+        Variable      "TrigSrc"
+        Value         "1"
+        Show          off
+      }
+      Parameter {
+        Variable      "SigMode"
+        Value         "1"
+        Show          off
+      }
+      Parameter {
+        Variable      "AdcUnit"
+        Value         "2"
+        Show          off
+      }
+      Parameter {
+        Variable      "Input"
+        Value         "[4 3 2]"
+        Show          off
+      }
+      Parameter {
+        Variable      "Scale"
+        Value         "[1 4.54 4.54]"
+        Show          off
+      }
+      Parameter {
+        Variable      "Offset"
+        Value         "[0 0 0]"
+        Show          off
+      }
+      Parameter {
+        Variable      "AcqTimeSel"
+        Value         "1"
+        Show          off
+      }
+      Parameter {
+        Variable      "AcqTime"
+        Value         "0"
+        Show          off
+      }
+      Parameter {
+        Variable      "BitRes"
+        Value         ""
+        Show          off
+      }
+      Parameter {
+        Variable      "VoltageRef"
+        Value         ""
+        Show          off
+      }
+      Parameter {
+        Variable      "TargetPortIndices"
+        Value         "1"
+        Show          off
+      }
+      Terminal {
+        Type          Output
+        Position      [29, 0]
+        Direction     right
+      }
+      Terminal {
+        Type          EventOutput
+        Position      [29, 15]
+        Direction     right
+      }
+      Terminal {
+        Type          EventInput
+        Position      [0, -25]
+        Direction     up
+      }
+    }
+    Component {
+      Type          Reference
+      SrcComponent  "TIC2000_Lib/ADC"
+      Name          "ADC1"
+      Show          on
+      Position      [330, 320]
+      Direction     up
+      Flipped       off
+      LabelPosition south
+      Frame         [-25, -25; 25, 25]
+      Parameter {
+        Variable      "TrigSrc"
+        Value         "1"
+        Show          off
+      }
+      Parameter {
+        Variable      "SigMode"
+        Value         "1"
+        Show          off
+      }
+      Parameter {
+        Variable      "AdcUnit"
+        Value         "3"
+        Show          off
+      }
+      Parameter {
+        Variable      "Input"
+        Value         "[2]"
+        Show          off
+      }
+      Parameter {
+        Variable      "Scale"
+        Value         "[1]"
+        Show          off
+      }
+      Parameter {
+        Variable      "Offset"
+        Value         "[0]"
+        Show          off
+      }
+      Parameter {
+        Variable      "AcqTimeSel"
+        Value         "1"
+        Show          off
+      }
+      Parameter {
+        Variable      "AcqTime"
+        Value         "0"
+        Show          off
+      }
+      Parameter {
+        Variable      "BitRes"
+        Value         ""
+        Show          off
+      }
+      Parameter {
+        Variable      "VoltageRef"
+        Value         ""
+        Show          off
+      }
+      Parameter {
+        Variable      "TargetPortIndices"
+        Value         "2"
+        Show          off
+      }
+      Terminal {
+        Type          Output
+        Position      [29, 0]
+        Direction     right
+      }
+      Terminal {
+        Type          EventOutput
+        Position      [29, 15]
+        Direction     right
+      }
+      Terminal {
+        Type          EventInput
+        Position      [0, -25]
+        Direction     up
+      }
+    }
+    Component {
+      Type          Reference
+      SrcComponent  "TIC2000_Lib/DAC"
+      Name          "DAC1"
+      Show          on
+      Position      [470, 320]
+      Direction     up
+      Flipped       off
+      LabelPosition south
+      Frame         [-25, -20; 25, 20]
+      Parameter {
+        Variable      "DacUnit"
+        Value         "2"
+        Show          off
+      }
+      Parameter {
+        Variable      "Scale"
+        Value         "1"
+        Show          off
+      }
+      Parameter {
+        Variable      "Offset"
+        Value         "0"
+        Show          off
+      }
+      Parameter {
+        Variable      "MinOutput"
+        Value         "0"
+        Show          off
+      }
+      Parameter {
+        Variable      "MaxOutput"
+        Value         "3.3"
+        Show          off
+      }
+      Parameter {
+        Variable      "TargetPortIndices"
+        Value         "3"
+        Show          off
+      }
+      Terminal {
+        Type          Input
+        Position      [-25, 0]
+        Direction     left
+      }
+    }
+    Component {
+      Type          Reference
+      SrcComponent  "TIC2000_Lib/DAC"
+      Name          "DAC"
+      Show          on
+      Position      [465, 65]
+      Direction     up
+      Flipped       off
+      LabelPosition south
+      Frame         [-25, -20; 25, 20]
+      Parameter {
+        Variable      "DacUnit"
+        Value         "1"
+        Show          off
+      }
+      Parameter {
+        Variable      "Scale"
+        Value         "1"
+        Show          off
+      }
+      Parameter {
+        Variable      "Offset"
+        Value         "0"
+        Show          off
+      }
+      Parameter {
+        Variable      "MinOutput"
+        Value         "0"
+        Show          off
+      }
+      Parameter {
+        Variable      "MaxOutput"
+        Value         "3.3"
+        Show          off
+      }
+      Parameter {
+        Variable      "TargetPortIndices"
+        Value         "4"
+        Show          off
+      }
+      Terminal {
+        Type          Input
+        Position      [-25, 0]
+        Direction     left
+      }
+    }
+    Component {
+      Type          CScript
+      Name          "IV and NL3"
+      Show          on
+      Position      [505, 765]
+      Direction     up
+      Flipped       off
+      LabelPosition south
+      Parameter {
+        Variable      "DialogGeometry"
+        Value         "[0 65 1492 840]"
+        Show          off
+      }
+      Parameter {
+        Variable      "NumInputs"
+        Value         "3"
+        Show          off
+      }
+      Parameter {
+        Variable      "NumOutputs"
+        Value         "1"
+        Show          off
+      }
+      Parameter {
+        Variable      "NumContStates"
+        Value         "1"
+        Show          off
+      }
+      Parameter {
+        Variable      "NumDiscStates"
+        Value         "0"
+        Show          off
+      }
+      Parameter {
+        Variable      "NumZCSignals"
+        Value         "0"
+        Show          off
+      }
+      Parameter {
+        Variable      "DirectFeedthrough"
+        Value         "1"
+        Show          off
+      }
+      Parameter {
+        Variable      "Ts"
+        Value         "[0,0]"
+        Show          off
+      }
+      Parameter {
+        Variable      "TerminalBasedSampleTimes"
+        Value         "1"
+        Show          off
+      }
+      Parameter {
+        Variable      "Parameters"
+        Value         ""
+        Show          off
+      }
+      Parameter {
+        Variable      "LangStandard"
+        Value         "2"
+        Show          off
+      }
+      Parameter {
+        Variable      "GnuExtensions"
+        Value         "1"
+        Show          off
+      }
+      Parameter {
+        Variable      "RuntimeCheck"
+        Value         "2"
+        Show          off
+      }
+      Parameter {
+        Variable      "HighlightLevel"
+        Value         "0"
+        Show          off
+      }
+      Parameter {
+        Variable      "Declarations"
+        Value         "#include <math.h>\n"
+"\n"
+"#define Im1  InputSignal(0,0)\n"
+"#define T0   InputSignal(0,1)\n"
+"/* InputSignal(0,2) (old Vinit) is no longer used */\n"
+"#define Vout OutputSignal(0,0)\n"
+"\n"
+"/* Physical constants (exact SI, same as MATLAB) */\n"
+"#define Q_E 1.602176634e-19\n"
+"#define K_B 1.380649e-23\n"
+"\n"
+"/* PV parameters: same values as the MATLAB model */\n"
+"static const double Isc = 9.91;          /* short-circuit current [A] */\n"
+"static const double Voc = 39.71/3.0;     /* open-circuit voltage [V] */\n"
+"static const double A   = 1.0;           /* diode ideality factor */\n"
+"static const double Ns  = 20.0;          /* series cells (60/3) */\n"
+"static const double Rs  = 0.0907;        /* series resistance [ohm] */\n"
+"static const double Rsh = 276.4340;      /* shunt resistance [ohm] */\n"
+"\n"
+"static double a1, Is1, VocT;             /* temperature-dependent */\n"
+"static double V_prev;                    /* warm start: last solution */\n"
+"\n"
+"static void pv_params(double T0C)\n"
+"{\n"
+"    double T1 = T0C + 273.15;\n"
+"    double B  = -0.28*Voc/100.0;         /* Voc temp. coeff. [V/K] */\n"
+"    VocT = Voc + B*(T1 - 298.15);\n"
+"    a1   = Q_E/(Ns*K_B*T1*A);\n"
+"    Is1  = (Isc + Isc*Rs/Rsh - VocT/Rsh) /\n"
+"           (exp(a1*VocT) - exp(a1*Isc*Rs));\n"
+"}\n"
+"\n"
+"/* MPP condition f(V) = I + V*dI/dV, and its partial derivative wrt V */\n"
+"static double mpp_f(double V, double I, double *df)\n"
+"{\n"
+"    double arg = a1*(V + I*Rs), e, N, D, dN, dD;\n"
+"    if (arg > 700.0) arg = 700.0;\n"
+"    e  = exp(arg);\n"
+"    N  = -Is1*a1*e - 1.0/Rsh;\n"
+"    D  = 1.0 + Rs/Rsh + a1*Is1*Rs*e;\n"
+"    dN = -Is1*a1*a1*e;\n"
+"    dD =  a1*a1*Is1*Rs*e;\n"
+"    *df = N/D + V*(dN*D - N*dD)/(D*D);\n"
+"    return I + V*N/D;\n"
+"}\n"
+"\n"
+"/* Ideal MPP voltage at current Im: safeguarded Newton on [0, VocT] */\n"
+"static double vmpp_ideal(double Im)\n"
+"{\n"
+"    double I = Im, lo = 0.0, hi = VocT, V = V_prev, f, df, Vn;\n"
+"    int it;\n"
+"\n"
+"    if (I < 0.0) I = 0.0;\n"
+"    if (I > Isc) I = Isc;\n"
+"    if (!(V > lo && V < hi)) V = 0.8*VocT;\n"
+"\n"
+"    for (it = 0; it < 20; it++) {\n"
+"        f = mpp_f(V, I, &df);\n"
+"        if (f > 0.0) lo = V; else hi = V;\n"
+"        Vn = V - f/df;\n"
+"        if (!(Vn > lo && Vn < hi)) Vn = 0.5*(lo + hi);\n"
+"        if (fabs(Vn - V) < 1e-6) { V = Vn; break; }\n"
+"        V = Vn;\n"
+"    }\n"
+"    V_prev = V;\n"
+"    return V;\n"
+"}"
+        Show          off
+      }
+      Parameter {
+        Variable      "StartFcn"
+        Value         "V_prev = 0.8*Voc;"
+        Show          off
+      }
+      Parameter {
+        Variable      "OutputFcn"
+        Value         "pv_params(T0);\n"
+"Vout = vmpp_ideal(Im1);\n"
+"  \n"
+"\n"
+"\n"
+        Show          off
+      }
+      Parameter {
+        Variable      "UpdateFcn"
+        Value         ""
+        Show          off
+      }
+      Parameter {
+        Variable      "DerivativeFcn"
+        Value         ""
+        Show          off
+      }
+      Parameter {
+        Variable      "TerminateFcn"
+        Value         ""
+        Show          off
+      }
+      Parameter {
+        Variable      "StoreCustomStateFcn"
+        Value         ""
+        Show          off
+      }
+      Parameter {
+        Variable      "RestoreCustomStateFcn"
+        Value         ""
+        Show          off
+      }
+    }
     Connection {
       Type          Signal
       SrcComponent  "Transfer Fcn3"
@@ -2668,21 +2770,6 @@ Plecs {
     }
     Connection {
       Type          Signal
-      SrcComponent  "i1(68 gen brd)B4   B5  V1 B3(25) --J3_6  V2 B2(28) --J3_9"
-      SrcTerminal   1
-      DstComponent  "Demux1"
-      DstTerminal   1
-    }
-    Connection {
-      Type          Event
-      SrcComponent  "i1(68 gen brd)B4   B5  V1 B3(25) --J3_6  V2 B2(28) --J3_9"
-      SrcTerminal   2
-      Points        [300, 170]
-      DstComponent  "Control Task\nTrigger"
-      DstTerminal   1
-    }
-    Connection {
-      Type          Signal
       SrcComponent  "Sum1"
       SrcTerminal   1
       Points        [690, 485]
@@ -2693,21 +2780,6 @@ Plecs {
       }
       Branch {
         DstComponent  "Discrete PID\nController"
-        DstTerminal   1
-      }
-    }
-    Connection {
-      Type          Signal
-      SrcComponent  "IV and NL2"
-      SrcTerminal   2
-      Points        [565, 540; 565, 515]
-      Branch {
-        DstComponent  "Transfer Fcn3"
-        DstTerminal   1
-      }
-      Branch {
-        Points        [565, 440]
-        DstComponent  "Vref - V2"
         DstTerminal   1
       }
     }
@@ -2728,24 +2800,17 @@ Plecs {
     }
     Connection {
       Type          Signal
-      SrcComponent  "From18"
-      SrcTerminal   1
-      DstComponent  "Transfer Fcn"
-      DstTerminal   1
-    }
-    Connection {
-      Type          Signal
       SrcComponent  "IV and NL3"
       SrcTerminal   2
       Points        [565, 765]
       Branch {
-        Points        [565, 675; 605, 675]
-        DstComponent  "\nVref1 - V1"
+        Points        [590, 765; 590, 755]
+        DstComponent  "Transfer Fcn2"
         DstTerminal   1
       }
       Branch {
-        Points        [590, 765; 590, 755]
-        DstComponent  "Transfer Fcn2"
+        Points        [565, 675; 605, 675]
+        DstComponent  "\nVref1 - V1"
         DstTerminal   1
       }
     }
@@ -2781,13 +2846,6 @@ Plecs {
     }
     Connection {
       Type          Signal
-      SrcComponent  "From20"
-      SrcTerminal   1
-      DstComponent  "Sum"
-      DstTerminal   2
-    }
-    Connection {
-      Type          Signal
       SrcComponent  "Sum"
       SrcTerminal   1
       Points        [780, 700]
@@ -2800,43 +2858,6 @@ Plecs {
         DstComponent  "\nVref1 - V1"
         DstTerminal   2
       }
-    }
-    Connection {
-      Type          Signal
-      SrcComponent  "Demux1"
-      SrcTerminal   2
-      Points        [390, 145; 390, 115]
-      DstComponent  "Goto6"
-      DstTerminal   1
-    }
-    Connection {
-      Type          Signal
-      SrcComponent  "From24"
-      SrcTerminal   1
-      DstComponent  "Transfer Fcn1"
-      DstTerminal   1
-    }
-    Connection {
-      Type          Signal
-      SrcComponent  "From27"
-      SrcTerminal   1
-      DstComponent  "Sum1"
-      DstTerminal   2
-    }
-    Connection {
-      Type          Signal
-      SrcComponent  "Mux1"
-      SrcTerminal   1
-      DstComponent  "IV and NL2"
-      DstTerminal   1
-    }
-    Connection {
-      Type          Signal
-      SrcComponent  "  i2 (70 --J7_9)"
-      SrcTerminal   1
-      Points        [420, 320; 420, 150]
-      DstComponent  "Goto7"
-      DstTerminal   1
     }
     Connection {
       Type          Signal
@@ -2915,6 +2936,101 @@ Plecs {
       Points        [530, 150; 530, 160; 805, 160]
       DstComponent  "Goto24"
       DstTerminal   1
+    }
+    Connection {
+      Type          Signal
+      SrcComponent  "Mux1"
+      SrcTerminal   1
+      DstComponent  "IV and NL2"
+      DstTerminal   1
+    }
+    Connection {
+      Type          Signal
+      SrcComponent  "IV and NL2"
+      SrcTerminal   2
+      Points        [565, 540; 565, 515]
+      Branch {
+        DstComponent  "Transfer Fcn3"
+        DstTerminal   1
+      }
+      Branch {
+        Points        [565, 440]
+        DstComponent  "Vref - V2"
+        DstTerminal   1
+      }
+    }
+    Connection {
+      Type          Signal
+      SrcComponent  "ADC"
+      SrcTerminal   1
+      DstComponent  "Demux1"
+      DstTerminal   1
+    }
+    Connection {
+      Type          Event
+      SrcComponent  "ADC"
+      SrcTerminal   2
+      Points        [300, 170]
+      DstComponent  "Control Task\nTrigger"
+      DstTerminal   1
+    }
+    Connection {
+      Type          Signal
+      SrcComponent  "From27"
+      SrcTerminal   1
+      DstComponent  "Sum1"
+      DstTerminal   2
+    }
+    Connection {
+      Type          Signal
+      SrcComponent  "From20"
+      SrcTerminal   1
+      DstComponent  "Sum"
+      DstTerminal   2
+    }
+    Connection {
+      Type          Signal
+      SrcComponent  "From18"
+      SrcTerminal   1
+      DstComponent  "Transfer Fcn"
+      DstTerminal   1
+    }
+    Connection {
+      Type          Signal
+      SrcComponent  "ADC1"
+      SrcTerminal   1
+      Points        [420, 320]
+      Branch {
+        Points        [420, 150]
+        DstComponent  "Goto7"
+        DstTerminal   1
+      }
+      Branch {
+        DstComponent  "DAC1"
+        DstTerminal   1
+      }
+    }
+    Connection {
+      Type          Signal
+      SrcComponent  "From24"
+      SrcTerminal   1
+      DstComponent  "Transfer Fcn1"
+      DstTerminal   1
+    }
+    Connection {
+      Type          Signal
+      SrcComponent  "Demux1"
+      SrcTerminal   2
+      Points        [390, 145; 390, 115]
+      Branch {
+        DstComponent  "Goto6"
+        DstTerminal   1
+      }
+      Branch {
+        Points        [390, 65]
+        DstComponent  "DAC"
+        DstTerminal   1
+      }
     }
     Annotation {
       Name          "<html><body>\n<p><span style=\" font-size:18px; font-weig"

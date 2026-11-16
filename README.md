@@ -5,18 +5,12 @@ Hi! Here is the Git for the DPP Modeling Team to make file sharing easier. Every
 
 This will be linked in the Slack as well:)
 
-Quick Set up Notes -> I made a branch for everyone working on the team. Here are the names of the branches I currently have set up. 
-
-git branch Yuyu
-git branch Yichen
-git branch Taiwei
-git branch Adri
-git branch Selin
+Quick Set up Notes -> I made a branch for everyone working on the team. Here are the names of the branches I currently have set up: Adri, Yuyu, Yichen, Taiwei, Selin
 
 Please run this in your bash/terminal
 
-git clone https://github.com/AdriK2/Model-Based-Control-DPP.git
-cd Model-Based-Control-DPP
+git clone https://github.com/AdriK2/Model-Based-Control-DPP.git\
+cd Model-Based-Control-DPP\
 git checkout NAME        # their own branch name
 
 When you want to commit a change to the file -> first check you are in your own branch with
@@ -25,8 +19,8 @@ git status
 
 Than commit using
 
-git add .
-git commit -m "Describe the change"
+git add .\
+git commit -m "Describe the change"\
 git push
 
 Please add comments to your commits :), and commit often

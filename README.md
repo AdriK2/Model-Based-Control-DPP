@@ -9,9 +9,10 @@ Quick Set up Notes -> I made a branch for everyone working on the team. Here are
 
 Please run this in your bash/terminal
 
-git clone https://github.com/AdriK2/Model-Based-Control-DPP.git\
+git clone https://github.com/AdriK2/Model-Based-Control-DPP.git
+
 cd Model-Based-Control-DPP\
-git checkout NAME        # their own branch name
+git checkout [YOUR NAME]
 
 When you want to commit a change to the file -> first check you are in your own branch with
 
